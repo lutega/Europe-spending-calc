@@ -28,12 +28,30 @@ const CATEGORIES = {
 
 /** Reimbursement category buckets for corporate reporting. @constant */
 const REIMBURSEMENT_CATEGORIES = {
-  lodging:    { label: "Lodging",    icon: "🏨", color: "#60a5fa" },
-  boarding:   { label: "Boarding",   icon: "🍴", color: "#facc15" },
-  telephone:  { label: "Telephone",  icon: "📞", color: "#22d3ee" },
-  taxi:       { label: "Taxi",       icon: "🚕", color: "#fbbf24" },
-  conveyance: { label: "Conveyance", icon: "🚙", color: "#c084fc" },
-  others:     { label: "Others",     icon: "📝", color: "#f472b6" },
+  lodging: {
+    label: "Lodging", icon: "🏨", color: "#60a5fa",
+    definition: "Biaya akomodasi/penginapan selama dinas (hotel, hostel, Airbnb, guest house).",
+  },
+  boarding: {
+    label: "Boarding", icon: "🍴", color: "#facc15",
+    definition: "Biaya konsumsi makan & minum selama dinas (sarapan, makan siang, makan malam, snack, kopi).",
+  },
+  telephone: {
+    label: "Telephone", icon: "📞", color: "#22d3ee",
+    definition: "Biaya komunikasi (pulsa, paket data, roaming internasional, WiFi/internet pendukung kerja).",
+  },
+  taxi: {
+    label: "Taxi", icon: "🚕", color: "#fbbf24",
+    definition: "Biaya taksi & ride-hailing (Grab/Gojek/Uber/Bolt/Cabify), termasuk taksi bandara.",
+  },
+  conveyance: {
+    label: "Conveyance", icon: "🚙", color: "#c084fc",
+    definition: "Transportasi umum & antar-kota (pesawat, kereta, bus, metro/MRT, tram, kapal, rental kendaraan).",
+  },
+  others: {
+    label: "Others", icon: "📝", color: "#f472b6",
+    definition: "Pengeluaran lain di luar kategori di atas — wajib disertai keterangan (specify).",
+  },
 };
 
 /** Maps primary category → reimbursement bucket. @constant */
@@ -221,6 +239,24 @@ const exportHistoryToPDF = (expenses, notes) => {
       </div>
     </div>
 
+    <h2>Definisi & Mapping Akun Reimbursement</h2>
+    <table>
+      <thead><tr><th>Akun</th><th>Definisi</th><th>Kategori Pengeluaran</th></tr></thead>
+      <tbody>
+        ${Object.entries(REIMBURSEMENT_CATEGORIES).map(([rKey, rc]) => {
+          const sources = Object.entries(CATEGORY_TO_REIMBURSEMENT)
+            .filter(([, r]) => r === rKey)
+            .map(([cKey]) => CATEGORIES[cKey]?.label)
+            .filter(Boolean);
+          return `<tr>
+            <td><strong>${escapeHtml(rc.label)}</strong></td>
+            <td>${escapeHtml(rc.definition)}</td>
+            <td>${sources.length ? sources.map(escapeHtml).join(", ") : "<em>—</em>"}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+
     <div class="footer">Barcelona Trip Expense Tracker · Pilih "Save as PDF" di dialog print untuk export</div>
     <script>window.onload = () => { setTimeout(() => window.print(), 250); };</script>
     </body></html>`;
@@ -314,6 +350,77 @@ function ExpenseRow({ expense, onDelete }) {
 }
 
 const inputStyle = { width: "100%", padding: "9px 10px", borderRadius: 8, background: "#0f172a", border: "1px solid #2d3f60", color: "#e2e8f0", fontSize: 13, boxSizing: "border-box" };
+
+/**
+ * Reference card: definition of each reimbursement account
+ * and which expense categories map into it.
+ */
+function ReimbursementMapping() {
+  const [open, setOpen] = useState(false);
+
+  const reverseMap = Object.entries(REIMBURSEMENT_CATEGORIES).reduce((acc, [rKey]) => {
+    acc[rKey] = Object.entries(CATEGORY_TO_REIMBURSEMENT)
+      .filter(([, r]) => r === rKey)
+      .map(([cKey]) => CATEGORIES[cKey])
+      .filter(Boolean);
+    return acc;
+  }, {});
+
+  return (
+    <div style={{ background: "#1a2744", border: "1px solid #2d3f60", borderRadius: 14, marginBottom: 14, overflow: "hidden" }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", cursor: "pointer" }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          📚 Definisi & Mapping Akun Reimbursement
+        </div>
+        <span style={{ color: "#64748b", fontSize: 14 }}>{open ? "▲" : "▼"}</span>
+      </div>
+
+      {open && (
+        <div style={{ padding: "0 16px 16px" }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 10, lineHeight: 1.5 }}>
+            Setiap pengeluaran dipetakan otomatis ke salah satu akun reimbursement di bawah. Bisa di-override manual saat input.
+          </div>
+
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #2d3f60" }}>
+                <th style={{ textAlign: "left", padding: "8px 6px", color: "#94a3b8", fontWeight: 600, fontSize: 11 }}>Akun</th>
+                <th style={{ textAlign: "left", padding: "8px 6px", color: "#94a3b8", fontWeight: 600, fontSize: 11 }}>Definisi & Kategori Pengeluaran</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(REIMBURSEMENT_CATEGORIES).map(([key, rc]) => (
+                <tr key={key} style={{ borderBottom: "1px solid #1e293b", verticalAlign: "top" }}>
+                  <td style={{ padding: "10px 6px", whiteSpace: "nowrap" }}>
+                    <div style={{ display: "inline-block", padding: "3px 9px", borderRadius: 10, background: `${rc.color}22`, color: rc.color, fontWeight: 700, fontSize: 12 }}>
+                      {rc.icon} {rc.label}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 6px", color: "#cbd5e1", lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 5 }}>{rc.definition}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {reverseMap[key].length === 0 && (
+                        <span style={{ fontSize: 11, color: "#475569", fontStyle: "italic" }}>— (manual override saja)</span>
+                      )}
+                      {reverseMap[key].map((cat, i) => (
+                        <span key={i} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#0f172a", border: `1px solid ${cat.color}40`, color: cat.color }}>
+                          {cat.icon} {cat.label}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * Manual expense entry form.
@@ -682,6 +789,7 @@ export default function App() {
         {/* Tab: Budget */}
         {activeTab === "budget" && (
           <>
+            <ReimbursementMapping />
             <div style={{ background: "#1a2744", border: "1px solid #2d3f60", borderRadius: 14, padding: 18, marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.05em" }}>Ringkasan Budget</div>
               {[
