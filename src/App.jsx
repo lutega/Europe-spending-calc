@@ -12,12 +12,18 @@ const TRIP_CONFIG = {
 
 /** Expense categories. @constant */
 const CATEGORIES = {
-  transport: { label: "Transport",    icon: "🚇", color: "#38bdf8" },
-  lunch:     { label: "Makan Siang",  icon: "🥗", color: "#34d399" },
-  dinner:    { label: "Makan Malam",  icon: "🍽️", color: "#a78bfa" },
-  snack:     { label: "Jajan/Kopi",   icon: "☕", color: "#f59e0b" },
-  flight:    { label: "Penerbangan",  icon: "✈️", color: "#fb7185" },
-  other:     { label: "Lainnya",      icon: "📦", color: "#94a3b8" },
+  transport:  { label: "Transport",    icon: "🚇", color: "#38bdf8" },
+  lunch:      { label: "Makan Siang",  icon: "🥗", color: "#34d399" },
+  dinner:     { label: "Makan Malam",  icon: "🍽️", color: "#a78bfa" },
+  snack:      { label: "Jajan/Kopi",   icon: "☕", color: "#f59e0b" },
+  flight:     { label: "Penerbangan",  icon: "✈️", color: "#fb7185" },
+  lodging:    { label: "Lodging",      icon: "🏨", color: "#60a5fa" },
+  boarding:   { label: "Boarding",     icon: "🍴", color: "#facc15" },
+  telephone:  { label: "Telephone",    icon: "📞", color: "#22d3ee" },
+  taxi:       { label: "Taxi",         icon: "🚕", color: "#fbbf24" },
+  conveyance: { label: "Conveyance",   icon: "🚙", color: "#c084fc" },
+  others:     { label: "Others",       icon: "📝", color: "#f472b6", requiresSpecify: true },
+  other:      { label: "Lainnya",      icon: "📦", color: "#94a3b8" },
 };
 
 /** Supported currencies. @constant */
@@ -127,7 +133,12 @@ function ExpenseRow({ expense, onDelete }) {
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "#162032", borderLeft: `3px solid ${cat.color}`, marginBottom: 6 }}>
       <span style={{ fontSize: 18 }}>{cat.icon}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: "#e2e8f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{expense.description}</div>
+        <div style={{ fontSize: 13, color: "#e2e8f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {expense.description}
+          {expense.outOfPocket && (
+            <span style={{ marginLeft: 6, fontSize: 9, padding: "1px 6px", borderRadius: 10, background: "#78350f", color: "#fbbf24", fontWeight: 700 }}>OOP</span>
+          )}
+        </div>
         <div style={{ fontSize: 11, color: "#64748b" }}>{cat.label} · {expense.time}</div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -156,12 +167,16 @@ const inputStyle = { width: "100%", padding: "9px 10px", borderRadius: 8, backgr
  * @param {Function} props.onAdd - Callback to add an expense
  */
 function AddExpensePanel({ onAdd }) {
-  const [form, setForm] = useState({ amount: "", currency: "EUR", category: "lunch", description: "", date: barcelonaToday() });
+  const [form, setForm] = useState({ amount: "", currency: "EUR", category: "lunch", description: "", date: barcelonaToday(), outOfPocket: false });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const requiresSpecify = CATEGORIES[form.category]?.requiresSpecify;
+  const isForeign = form.currency !== "IDR";
 
   const handleSubmit = () => {
     const raw = parseFloat(form.amount);
     if (!raw || isNaN(raw)) return;
+    if (requiresSpecify && !form.description.trim()) return;
     onAdd({
       id: genId(),
       amount: toEUR(raw, form.currency),
@@ -171,8 +186,9 @@ function AddExpensePanel({ onAdd }) {
       description: form.description || CATEGORIES[form.category].label,
       date: form.date,
       time: barcelonaTime(),
+      outOfPocket: form.outOfPocket,
     });
-    setForm({ amount: "", currency: form.currency, category: form.category, description: "", date: barcelonaToday() });
+    setForm({ amount: "", currency: form.currency, category: form.category, description: "", date: barcelonaToday(), outOfPocket: false });
   };
 
   return (
@@ -199,10 +215,12 @@ function AddExpensePanel({ onAdd }) {
         </div>
       </div>
 
-      {/* EUR preview for IDR */}
-      {form.currency === "IDR" && form.amount && !isNaN(parseFloat(form.amount)) && (
+      {/* Currency conversion preview */}
+      {form.amount && !isNaN(parseFloat(form.amount)) && (
         <div style={{ fontSize: 11, color: "#34d399", marginBottom: 8, textAlign: "right" }}>
-          ≈ {fmtEUR(toEUR(parseFloat(form.amount), "IDR"))}
+          {form.currency === "IDR"
+            ? `≈ ${fmtEUR(toEUR(parseFloat(form.amount), "IDR"))}`
+            : `≈ ${fmtIDR(toEUR(parseFloat(form.amount), form.currency))} (IDR)`}
         </div>
       )}
 
@@ -215,10 +233,17 @@ function AddExpensePanel({ onAdd }) {
       </div>
 
       {/* Description + Date */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>Deskripsi</div>
-          <input placeholder="Nama tempat / item" value={form.description} onChange={e => set("description", e.target.value)} style={inputStyle} />
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
+            Deskripsi {requiresSpecify && <span style={{ color: "#f472b6" }}>*specify</span>}
+          </div>
+          <input
+            placeholder={requiresSpecify ? "Wajib: jelaskan pengeluaran" : "Nama tempat / item"}
+            value={form.description}
+            onChange={e => set("description", e.target.value)}
+            style={{ ...inputStyle, borderColor: requiresSpecify && !form.description.trim() ? "#f472b6" : "#2d3f60" }}
+          />
         </div>
         <div>
           <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>Tanggal</div>
@@ -226,7 +251,28 @@ function AddExpensePanel({ onAdd }) {
         </div>
       </div>
 
-      <button onClick={handleSubmit} style={{ width: "100%", padding: 11, borderRadius: 9, border: "none", background: "linear-gradient(135deg,#2563eb,#7c3aed)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+      {/* Out of pocket toggle */}
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: "#0f172a", border: "1px solid #2d3f60", cursor: "pointer", fontSize: 12, color: "#cbd5e1" }}>
+        <input
+          type="checkbox"
+          checked={form.outOfPocket}
+          onChange={e => set("outOfPocket", e.target.checked)}
+          style={{ accentColor: "#f59e0b", width: 16, height: 16, cursor: "pointer" }}
+        />
+        <span>💵 Out of pocket <span style={{ color: "#64748b" }}>(dibayar pribadi, perlu reimburse)</span></span>
+      </label>
+
+      <button
+        onClick={handleSubmit}
+        disabled={requiresSpecify && !form.description.trim()}
+        style={{
+          width: "100%", padding: 11, borderRadius: 9, border: "none",
+          background: requiresSpecify && !form.description.trim() ? "#334155" : "linear-gradient(135deg,#2563eb,#7c3aed)",
+          color: "#fff", fontWeight: 700, fontSize: 14,
+          cursor: requiresSpecify && !form.description.trim() ? "not-allowed" : "pointer",
+          opacity: requiresSpecify && !form.description.trim() ? 0.6 : 1,
+        }}
+      >
         + Tambah Pengeluaran
       </button>
     </div>
