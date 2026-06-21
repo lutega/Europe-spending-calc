@@ -26,6 +26,36 @@ const CATEGORIES = {
   other:      { label: "Lainnya",      icon: "📦", color: "#94a3b8" },
 };
 
+/** Reimbursement category buckets for corporate reporting. @constant */
+const REIMBURSEMENT_CATEGORIES = {
+  lodging:    { label: "Lodging",    icon: "🏨", color: "#60a5fa" },
+  boarding:   { label: "Boarding",   icon: "🍴", color: "#facc15" },
+  telephone:  { label: "Telephone",  icon: "📞", color: "#22d3ee" },
+  taxi:       { label: "Taxi",       icon: "🚕", color: "#fbbf24" },
+  conveyance: { label: "Conveyance", icon: "🚙", color: "#c084fc" },
+  others:     { label: "Others",     icon: "📝", color: "#f472b6" },
+};
+
+/** Maps primary category → reimbursement bucket. @constant */
+const CATEGORY_TO_REIMBURSEMENT = {
+  transport:  "conveyance",
+  lunch:      "boarding",
+  dinner:     "boarding",
+  snack:      "boarding",
+  flight:     "conveyance",
+  lodging:    "lodging",
+  boarding:   "boarding",
+  telephone:  "telephone",
+  taxi:       "taxi",
+  conveyance: "conveyance",
+  others:     "others",
+  other:      "others",
+};
+
+/** Resolves an expense's reimbursement bucket (override → mapping → others). */
+const reimbursementOf = (expense) =>
+  expense.reimbursement || CATEGORY_TO_REIMBURSEMENT[expense.category] || "others";
+
 /** Supported currencies. @constant */
 const CURRENCIES = {
   EUR: { symbol: "€",  label: "EUR", flag: "🇪🇺" },
@@ -85,6 +115,122 @@ const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 const dayLabel = (dateStr) =>
   new Date(dateStr + "T12:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "short" });
 
+/** Escapes HTML for safe injection into print window. */
+const escapeHtml = (str) =>
+  String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+/**
+ * Builds & opens a print-ready window of the expense history table.
+ * User can choose "Save as PDF" in the browser print dialog.
+ */
+const exportHistoryToPDF = (expenses, notes) => {
+  const sorted = [...expenses].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  const byDate = groupByDate(sorted);
+  const dates = Object.keys(byDate).sort();
+
+  const reimbTotals = Object.keys(REIMBURSEMENT_CATEGORIES).map((key) => {
+    const items = expenses.filter((e) => reimbursementOf(e) === key);
+    return { key, label: REIMBURSEMENT_CATEGORIES[key].label, count: items.length, total: sumExpenses(items) };
+  }).filter((r) => r.total > 0);
+
+  const oop = expenses.filter((e) => e.outOfPocket);
+  const oopTotal = sumExpenses(oop);
+  const grandTotal = sumExpenses(expenses);
+
+  const dayBlocks = dates.map((date) => {
+    const dayItems = byDate[date];
+    const dayTotal = sumExpenses(dayItems);
+    const rows = dayItems.map((e) => {
+      const cat = CATEGORIES[e.category] ?? CATEGORIES.other;
+      const reimb = REIMBURSEMENT_CATEGORIES[reimbursementOf(e)];
+      const orig = e.currency === "IDR" && e.amountOrig
+        ? fmtIDRDirect(e.amountOrig)
+        : `${CURRENCIES[e.currency]?.symbol ?? ""}${Number(e.amountOrig ?? e.amount).toFixed(2)}`;
+      return `<tr>
+        <td>${escapeHtml(e.time)}</td>
+        <td>${escapeHtml(e.description)}</td>
+        <td>${escapeHtml(cat.label)}</td>
+        <td>${escapeHtml(reimb?.label ?? "-")}</td>
+        <td class="num">${escapeHtml(orig)}</td>
+        <td class="num">${fmtEUR(e.amount)}</td>
+        <td class="num">${fmtIDR(e.amount)}</td>
+        <td class="center">${e.outOfPocket ? "✓" : ""}</td>
+      </tr>`;
+    }).join("");
+    const note = notes?.[date];
+    return `
+      <h3>${escapeHtml(dayLabel(date))} <span class="muted">(${dayItems.length} tx · ${fmtEUR(dayTotal)})</span></h3>
+      <table>
+        <thead><tr>
+          <th>Waktu</th><th>Deskripsi</th><th>Kategori</th><th>Reimbursement</th>
+          <th class="num">Original</th><th class="num">EUR</th><th class="num">IDR</th><th class="center">OOP</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${note ? `<div class="note"><strong>Catatan:</strong> ${escapeHtml(note)}</div>` : ""}
+    `;
+  }).join("");
+
+  const reimbRows = reimbTotals.map((r) =>
+    `<tr><td>${escapeHtml(r.label)}</td><td class="center">${r.count}</td><td class="num">${fmtEUR(r.total)}</td><td class="num">${fmtIDR(r.total)}</td></tr>`
+  ).join("");
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Riwayat Pengeluaran — Barcelona</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: -apple-system, Segoe UI, system-ui, sans-serif; color: #111; padding: 24px; font-size: 11px; line-height: 1.4; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      h2 { font-size: 14px; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #333; }
+      h3 { font-size: 12px; margin: 14px 0 6px; color: #1e3a5f; }
+      .muted { color: #666; font-weight: normal; font-size: 10px; }
+      .meta { color: #666; font-size: 10px; margin-bottom: 14px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+      th, td { padding: 5px 7px; border: 1px solid #d0d0d0; text-align: left; vertical-align: top; }
+      th { background: #f0f4f8; font-weight: 700; font-size: 10px; }
+      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      td.center, th.center { text-align: center; }
+      .note { background: #fff8e1; border-left: 3px solid #f59e0b; padding: 6px 10px; margin: 4px 0 12px; font-size: 10px; }
+      .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+      .footer { margin-top: 24px; padding-top: 8px; border-top: 1px solid #ccc; font-size: 9px; color: #888; text-align: center; }
+      @media print { body { padding: 12mm; } h3 { page-break-after: avoid; } table { page-break-inside: auto; } tr { page-break-inside: avoid; } }
+    </style></head><body>
+    <h1>Riwayat Pengeluaran — Barcelona Trip</h1>
+    <div class="meta">Dicetak ${new Date().toLocaleString("id-ID")} · ${expenses.length} transaksi · Total ${fmtEUR(grandTotal)} (${fmtIDR(grandTotal)})</div>
+
+    <h2>Detail Per Hari</h2>
+    ${dayBlocks || '<p class="muted">Belum ada data.</p>'}
+
+    <div class="summary">
+      <div>
+        <h2>Ringkasan Reimbursement</h2>
+        <table>
+          <thead><tr><th>Kategori</th><th class="center">Tx</th><th class="num">EUR</th><th class="num">IDR</th></tr></thead>
+          <tbody>${reimbRows || '<tr><td colspan="4" class="muted">—</td></tr>'}
+          <tr style="font-weight:700;background:#f0f4f8"><td>TOTAL</td><td class="center">${expenses.length}</td><td class="num">${fmtEUR(grandTotal)}</td><td class="num">${fmtIDR(grandTotal)}</td></tr></tbody>
+        </table>
+      </div>
+      <div>
+        <h2>Out of Pocket</h2>
+        <table>
+          <tbody>
+            <tr><td>Transaksi perlu reimburse</td><td class="num">${oop.length}</td></tr>
+            <tr><td>Total EUR</td><td class="num">${fmtEUR(oopTotal)}</td></tr>
+            <tr><td>Total IDR</td><td class="num">${fmtIDR(oopTotal)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footer">Barcelona Trip Expense Tracker · Pilih "Save as PDF" di dialog print untuk export</div>
+    <script>window.onload = () => { setTimeout(() => window.print(), 250); };</script>
+    </body></html>`;
+
+  const win = window.open("", "_blank");
+  if (!win) { alert("Popup diblokir. Izinkan popup untuk export PDF."); return; }
+  win.document.write(html);
+  win.document.close();
+};
+
 // ─── Storage ──────────────────────────────────────────────────────────────────
 
 /**
@@ -129,6 +275,7 @@ function BudgetBar({ spent, total }) {
 /** Single expense row with delete. */
 function ExpenseRow({ expense, onDelete }) {
   const cat = CATEGORIES[expense.category] ?? CATEGORIES.other;
+  const reimb = REIMBURSEMENT_CATEGORIES[reimbursementOf(expense)];
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "#162032", borderLeft: `3px solid ${cat.color}`, marginBottom: 6 }}>
       <span style={{ fontSize: 18 }}>{cat.icon}</span>
@@ -139,7 +286,14 @@ function ExpenseRow({ expense, onDelete }) {
             <span style={{ marginLeft: 6, fontSize: 9, padding: "1px 6px", borderRadius: 10, background: "#78350f", color: "#fbbf24", fontWeight: 700 }}>OOP</span>
           )}
         </div>
-        <div style={{ fontSize: 11, color: "#64748b" }}>{cat.label} · {expense.time}</div>
+        <div style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span>{cat.label} · {expense.time}</span>
+          {reimb && (
+            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 10, background: `${reimb.color}22`, color: reimb.color, fontWeight: 600 }}>
+              {reimb.icon} {reimb.label}
+            </span>
+          )}
+        </div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         {expense.currency === "IDR" && expense.amountOrig ? (
@@ -167,11 +321,23 @@ const inputStyle = { width: "100%", padding: "9px 10px", borderRadius: 8, backgr
  * @param {Function} props.onAdd - Callback to add an expense
  */
 function AddExpensePanel({ onAdd }) {
-  const [form, setForm] = useState({ amount: "", currency: "EUR", category: "lunch", description: "", date: barcelonaToday(), outOfPocket: false });
+  const [form, setForm] = useState({ amount: "", currency: "EUR", category: "lunch", reimbursement: CATEGORY_TO_REIMBURSEMENT.lunch, reimbursementTouched: false, description: "", date: barcelonaToday(), outOfPocket: false });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const requiresSpecify = CATEGORIES[form.category]?.requiresSpecify;
   const isForeign = form.currency !== "IDR";
+
+  const handleCategoryChange = (category) => {
+    setForm(f => ({
+      ...f,
+      category,
+      reimbursement: f.reimbursementTouched ? f.reimbursement : (CATEGORY_TO_REIMBURSEMENT[category] || "others"),
+    }));
+  };
+
+  const handleReimbursementChange = (reimbursement) => {
+    setForm(f => ({ ...f, reimbursement, reimbursementTouched: true }));
+  };
 
   const handleSubmit = () => {
     const raw = parseFloat(form.amount);
@@ -183,12 +349,13 @@ function AddExpensePanel({ onAdd }) {
       amountOrig: raw,
       currency: form.currency,
       category: form.category,
+      reimbursement: form.reimbursement,
       description: form.description || CATEGORIES[form.category].label,
       date: form.date,
       time: barcelonaTime(),
       outOfPocket: form.outOfPocket,
     });
-    setForm({ amount: "", currency: form.currency, category: form.category, description: "", date: barcelonaToday(), outOfPocket: false });
+    setForm({ amount: "", currency: form.currency, category: form.category, reimbursement: form.reimbursement, reimbursementTouched: false, description: "", date: barcelonaToday(), outOfPocket: false });
   };
 
   return (
@@ -224,12 +391,22 @@ function AddExpensePanel({ onAdd }) {
         </div>
       )}
 
-      {/* Category */}
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>Kategori</div>
-        <select value={form.category} onChange={e => set("category", e.target.value)} style={inputStyle}>
-          {Object.entries(CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
-        </select>
+      {/* Category + Reimbursement Bucket */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>Kategori</div>
+          <select value={form.category} onChange={e => handleCategoryChange(e.target.value)} style={inputStyle}>
+            {Object.entries(CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
+            Reimbursement {form.reimbursementTouched && <span style={{ color: "#fbbf24" }}>· manual</span>}
+          </div>
+          <select value={form.reimbursement} onChange={e => handleReimbursementChange(e.target.value)} style={inputStyle}>
+            {Object.entries(REIMBURSEMENT_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Description + Date */}
@@ -479,12 +656,27 @@ export default function App() {
         {activeTab === "history" && (
           sortedDates.length === 0
             ? <div style={{ textAlign: "center", color: "#475569", fontSize: 13, padding: "40px 0" }}>Belum ada data pengeluaran</div>
-            : sortedDates.map(date => (
-                <DayCard key={date} date={date} expenses={byDate[date]}
-                  note={notes[date] ?? null}
-                  onDelete={handleDelete}
-                  onSaveNote={handleSaveNote} />
-              ))
+            : (
+              <>
+                <button
+                  onClick={() => exportHistoryToPDF(expenses, notes)}
+                  style={{
+                    width: "100%", padding: 11, marginBottom: 14, borderRadius: 9, border: "none",
+                    background: "linear-gradient(135deg,#dc2626,#b91c1c)", color: "#fff",
+                    fontWeight: 700, fontSize: 13, cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  }}
+                >
+                  📄 Export Riwayat ke PDF
+                </button>
+                {sortedDates.map(date => (
+                  <DayCard key={date} date={date} expenses={byDate[date]}
+                    note={notes[date] ?? null}
+                    onDelete={handleDelete}
+                    onSaveNote={handleSaveNote} />
+                ))}
+              </>
+            )
         )}
 
         {/* Tab: Budget */}
@@ -512,9 +704,54 @@ export default function App() {
               ))}
             </div>
 
+            {/* Reimbursement breakdown */}
+            <div style={{ background: "#1a2744", border: "1px solid #2d3f60", borderRadius: 14, padding: 18, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.05em" }}>Per Reimbursement Category</div>
+              {Object.entries(REIMBURSEMENT_CATEGORIES).map(([key, rc]) => {
+                const items = expenses.filter(e => reimbursementOf(e) === key);
+                const t = sumExpenses(items);
+                if (!t) return null;
+                const pct = totalVariable > 0 ? (t / totalVariable) * 100 : 0;
+                return (
+                  <div key={key} style={{ marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, color: "#e2e8f0" }}>{rc.icon} {rc.label} <span style={{ color: "#64748b", fontSize: 11 }}>· {items.length} tx</span></span>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: rc.color }}>{fmtEUR(t)}</div>
+                        <div style={{ fontSize: 10, color: "#475569" }}>{fmtIDR(t)}</div>
+                      </div>
+                    </div>
+                    <div style={{ height: 4, background: "#1e293b", borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: rc.color, borderRadius: 4 }} />
+                    </div>
+                  </div>
+                );
+              })}
+              {totalVariable === 0 && <div style={{ textAlign: "center", color: "#475569", fontSize: 13, padding: "20px 0" }}>Belum ada pengeluaran</div>}
+            </div>
+
+            {/* Out of pocket summary */}
+            {(() => {
+              const oop = expenses.filter(e => e.outOfPocket);
+              const oopTotal = sumExpenses(oop);
+              if (!oop.length) return null;
+              return (
+                <div style={{ background: "#1a2744", border: "1px solid #78350f", borderRadius: 14, padding: 18, marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>💵 Out of Pocket (Reimburse)</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: 12, color: "#cbd5e1" }}>{oop.length} transaksi perlu reimburse</div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#fbbf24" }}>{fmtEUR(oopTotal)}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>{fmtIDR(oopTotal)}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Category breakdown */}
             <div style={{ background: "#1a2744", border: "1px solid #2d3f60", borderRadius: 14, padding: 18, marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.05em" }}>Per Kategori</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.05em" }}>Per Kategori (Detail)</div>
               {Object.entries(CATEGORIES).map(([key, cat]) => {
                 const t = sumExpenses(expenses.filter(e => e.category === key));
                 if (!t) return null;
